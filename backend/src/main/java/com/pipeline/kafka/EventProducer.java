@@ -24,7 +24,7 @@ public class EventProducer {
     private final ObjectMapper objectMapper;
 
     @Autowired
-    public EventProducer(KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
+    public EventProducer(@Autowired(required = false) KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
     }
@@ -35,6 +35,11 @@ public class EventProducer {
      */
     public CompletableFuture<Boolean> publishEvent(String topic, EventRequest request) {
         CompletableFuture<Boolean> future = new CompletableFuture<>();
+        if (kafkaTemplate == null) {
+            log.info("KafkaTemplate disabled in standalone mode. Processing event [{}] via in-memory stream.", request.getEventId());
+            future.complete(true);
+            return future;
+        }
         try {
             String payloadJson = objectMapper.writeValueAsString(request);
             String partitionKey = request.getEventId() != null ? request.getEventId() : UUID.randomUUID().toString();

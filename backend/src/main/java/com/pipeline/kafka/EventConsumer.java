@@ -12,6 +12,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 
 @Service
+@ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class EventConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(EventConsumer.class);

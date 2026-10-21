@@ -34,6 +34,9 @@ public class EventPipelineService {
     private final EventProducer eventProducer;
     private final ObjectMapper objectMapper;
 
+    @org.springframework.beans.factory.annotation.Value("${spring.kafka.enabled:false}")
+    private boolean kafkaEnabled;
+
     // Metrics counters
     private final AtomicLong totalIngested = new AtomicLong(0);
     private final AtomicLong totalProcessed = new AtomicLong(0);
@@ -138,8 +141,10 @@ public class EventPipelineService {
             topic = KafkaConfig.TOPIC_NOTIFICATIONS;
         }
 
-        // Send to Kafka
-        eventProducer.publishEvent(topic, request);
+        // Send to Kafka if broker is enabled
+        if (kafkaEnabled) {
+            eventProducer.publishEvent(topic, request);
+        }
 
         // In standalone mode (when Kafka broker is local or offline), ensure audit is written immediately
         long latency = System.currentTimeMillis() - startTime;

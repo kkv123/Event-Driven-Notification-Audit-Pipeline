@@ -1,5 +1,6 @@
 package com.pipeline.config;
 
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -22,6 +23,7 @@ import java.util.Map;
 
 @Configuration
 @EnableKafka
+@ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class KafkaConfig {
 
     public static final String TOPIC_TRANSACTIONS = "transaction-events";
@@ -35,36 +37,56 @@ public class KafkaConfig {
     @Value("${spring.kafka.consumer.group-id:audit-pipeline-group}")
     private String groupId;
 
+    @Value("${spring.kafka.properties.security.protocol:PLAINTEXT}")
+    private String securityProtocol;
+
+    @Value("${spring.kafka.properties.sasl.mechanism:}")
+    private String saslMechanism;
+
+    @Value("${spring.kafka.properties.sasl.jaas.config:}")
+    private String saslJaasConfig;
+
+    private void applySaslConfigs(Map<String, Object> config) {
+        if (securityProtocol != null && !securityProtocol.isEmpty()) {
+            config.put("security.protocol", securityProtocol);
+        }
+        if (saslMechanism != null && !saslMechanism.isEmpty()) {
+            config.put("sasl.mechanism", saslMechanism);
+        }
+        if (saslJaasConfig != null && !saslJaasConfig.isEmpty()) {
+            config.put("sasl.jaas.config", saslJaasConfig);
+        }
+    }
+
+    @Bean
+    public KafkaAdmin kafkaAdmin() {
+        Map<String, Object> configs = new HashMap<>();
+        configs.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        applySaslConfigs(configs);
+        KafkaAdmin admin = new KafkaAdmin(configs);
+        admin.setFatalIfBrokerNotAvailable(false);
+        admin.setAutoCreate(false);
+        return admin;
+    }
+
     @Bean
     public NewTopic transactionEventsTopic() {
-        return TopicBuilder.name(TOPIC_TRANSACTIONS)
-                .partitions(3)
-                .replicas(1)
-                .build();
+        return TopicBuilder.name(TOPIC_TRANSACTIONS).partitions(3).replicas(1).build();
     }
 
     @Bean
     public NewTopic auditEventsTopic() {
-        return TopicBuilder.name(TOPIC_AUDIT)
-                .partitions(3)
-                .replicas(1)
-                .build();
+        return TopicBuilder.name(TOPIC_AUDIT).partitions(3).replicas(1).build();
     }
 
     @Bean
     public NewTopic notificationEventsTopic() {
-        return TopicBuilder.name(TOPIC_NOTIFICATIONS)
-                .partitions(3)
-                .replicas(1)
-                .build();
+        return TopicBuilder.name(TOPIC_NOTIFICATIONS).partitions(3).replicas(1).build();
     }
 
     @Bean
     public NewTopic dlqTopic() {
-        return TopicBuilder.name(TOPIC_DLQ)
-                .partitions(1)
-                .replicas(1)
-                .build();
+        return TopicBuilder.name(TOPIC_DLQ).partitions(1).replicas(1).build();
     }
 
     @Bean
@@ -73,10 +95,10 @@ public class KafkaConfig {
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        // Guaranteed at-least-once delivery configuration
         config.put(ProducerConfig.ACKS_CONFIG, "all");
-        config.put(ProducerConfig.RETRIES_CONFIG, 3);
+        config.put(ProducerConfig.RETRIES_CONFIG, 2);
         config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        applySaslConfigs(config);
         return new DefaultKafkaProducerFactory<>(config);
     }
 
@@ -92,8 +114,9 @@ public class KafkaConfig {
         config.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false); // Manual commit for at-least-once guarantee
+        config.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, false);
         config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        applySaslConfigs(config);
         return new DefaultKafkaConsumerFactory<>(config);
     }
 
@@ -102,11 +125,9 @@ public class KafkaConfig {
         ConcurrentKafkaListenerContainerFactory<String, String> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
-        // Manual immediate acknowledgment
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
-        // Concurrency matching 3 partitions
         factory.setConcurrency(3);
-        // Resilient error handler with 2 retries then skip/DLQ
+        factory.setAutoStartup(true);
         factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1000L, 2)));
         return factory;
     }
