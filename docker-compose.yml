@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # 1. Zookeeper for Kafka Coordination
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: pipeline-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  # 2. Apache Kafka Broker
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: pipeline-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  # 3. Redis for Token Bucket Rate-Limiting & Deduplication
+  redis:
+    image: redis:7.2-alpine
+    container_name: pipeline-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+
+  # 4. PostgreSQL for Audit Trail & Event Persistence
+  postgres:
+    image: postgres:16-alpine
+    container_name: pipeline-postgres
+    environment:
+      POSTGRES_DB: auditdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 5. Spring Boot Application (Optional Containerized Run)
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pipeline-app
+    depends_on:
+      - kafka
+      - redis
+      - postgres
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      REDIS_HOST: redis
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auditdb
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: password123
+
+volumes:
+  postgres_data:
