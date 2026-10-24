@@ -143,7 +143,7 @@ export default function App() {
   const handleBurstSimulation = async () => {
     setIsBursting(true);
     try {
-      await triggerBurst({ count: 35, includeDuplicates: true });
+      await triggerBurst({ count: 50, includeDuplicates: true });
       loadStats();
       loadAudit(0);
     } catch (err) {
