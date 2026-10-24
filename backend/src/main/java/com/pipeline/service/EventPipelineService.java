@@ -264,6 +264,33 @@ public class EventPipelineService {
         return stats;
     }
 
+    /**
+     * Purges all historical audit events from Supabase PostgreSQL in a single batch
+     * and resets all in-memory pipeline counters to prevent exceeding free-tier limits.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public Map<String, Object> purgeDatabaseRecords() {
+        long countBefore = auditRepository.count();
+        auditRepository.deleteAllInBatch();
+
+        // Reset all in-memory pipeline counters
+        totalIngested.set(0);
+        totalProcessed.set(0);
+        totalRateLimited.set(0);
+        totalDuplicates.set(0);
+        totalDlq.set(0);
+        windowIngested.set(0);
+        currentThroughputEps = 0.0;
+
+        log.info("Purged {} audit records from Supabase database and reset pipeline metrics.", countBefore);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("recordsPurged", countBefore);
+        result.put("message", "Successfully purged " + countBefore + " audit records from Supabase PostgreSQL.");
+        return result;
+    }
+
     public void incrementProcessedCount() {
         totalProcessed.incrementAndGet();
     }

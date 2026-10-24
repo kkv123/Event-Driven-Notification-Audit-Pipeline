@@ -86,6 +86,16 @@ export async function checkHealth() {
   return res.json();
 }
 
+export async function purgeAuditLogs() {
+  const res = await fetch(resolveUrl('/api/events/purge'), {
+    method: 'DELETE'
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to purge database records: ${res.statusText}`);
+  }
+  return res.json();
+}
+
 export async function testCloudConnections() {
   const res = await fetch(resolveUrl('/api/events/test-connections'));
   if (!res.ok) {

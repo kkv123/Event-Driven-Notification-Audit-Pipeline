@@ -139,6 +139,20 @@ public class EventController {
     }
 
     /**
+     * Purges all audit log records from Supabase PostgreSQL to free up cloud storage tier,
+     * and resets in-memory pipeline counters.
+     */
+    @DeleteMapping("/purge")
+    public ResponseEntity<Map<String, Object>> purgeDatabaseRecords() {
+        return ResponseEntity.ok(pipelineService.purgeDatabaseRecords());
+    }
+
+    @PostMapping("/cleanup")
+    public ResponseEntity<Map<String, Object>> cleanupDatabaseRecords() {
+        return ResponseEntity.ok(pipelineService.purgeDatabaseRecords());
+    }
+
+    /**
      * Returns pipeline statistics: Ingestion rate, Token Bucket status, Deduplication stats.
      */
     @GetMapping("/stats")

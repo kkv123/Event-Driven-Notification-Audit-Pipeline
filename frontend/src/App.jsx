@@ -13,7 +13,8 @@ import {
   Award,
   ChevronLeft,
   ChevronRight,
-  Code2
+  Code2,
+  Trash2
 } from 'lucide-react';
 
 import ArchitectureFlow from './components/ArchitectureFlow';
@@ -29,6 +30,7 @@ import {
   fetchAuditLogs,
   publishEvent,
   triggerBurst,
+  purgeAuditLogs,
   subscribeToEventStream
 } from './services/api';
 
@@ -69,6 +71,7 @@ export default function App() {
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
   const [selectedPayload, setSelectedPayload] = useState(null);
   const [isBursting, setIsBursting] = useState(false);
+  const [isPurging, setIsPurging] = useState(false);
   const [streamFilter, setStreamFilter] = useState('ALL');
 
   // Load Stats
@@ -154,6 +157,28 @@ export default function App() {
     }
   };
 
+  // Handle Purge Database Records (Free Tier Storage Guard)
+  const handlePurgeDatabase = async () => {
+    const confirmed = window.confirm(
+      'Are you sure you want to clean up all audit records from Supabase database?\n\nThis will purge historical records and reset counters so your free tier storage does not get filled.'
+    );
+    if (!confirmed) return;
+
+    setIsPurging(true);
+    try {
+      const res = await purgeAuditLogs();
+      setLiveEvents([]);
+      await loadStats();
+      await loadAudit(0);
+      alert(`Cleanup Complete: ${res.recordsPurged ?? 0} historical records purged from Supabase.`);
+    } catch (err) {
+      console.error('Purge error', err);
+      alert('Failed to purge database records: ' + (err.message || 'Check backend connection'));
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     loadAudit(0, searchQuery, statusFilter);
@@ -229,7 +254,17 @@ export default function App() {
               className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs rounded-lg transition shadow-md shadow-amber-600/30 flex items-center gap-1.5 disabled:opacity-50"
             >
               <Flame className="w-3.5 h-3.5" />
-              {isBursting ? 'Burst in Progress...' : 'Simulate Traffic Burst (35 Reqs)'}
+              {isBursting ? 'Burst in Progress...' : 'Simulate Traffic Burst (50 Reqs)'}
+            </button>
+
+            <button
+              onClick={handlePurgeDatabase}
+              disabled={isPurging}
+              className="px-3 py-2 bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-800/60 font-medium text-xs rounded-lg transition shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+              title="Purge all audit records from Supabase PostgreSQL to free up cloud DB storage"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              {isPurging ? 'Cleaning...' : 'Clean DB'}
             </button>
           </div>
         </div>
@@ -384,8 +419,20 @@ export default function App() {
                   <button
                     type="submit"
                     className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center justify-center"
+                    title="Search"
                   >
                     <Search className="w-3.5 h-3.5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePurgeDatabase}
+                    disabled={isPurging}
+                    className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 disabled:opacity-50"
+                    title="Purge all audit logs in Supabase to free up cloud database storage"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    <span className="hidden sm:inline">{isPurging ? 'Purging...' : 'Purge DB'}</span>
                   </button>
                 </form>
               </div>
