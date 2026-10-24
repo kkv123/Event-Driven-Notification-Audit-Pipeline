@@ -54,6 +54,11 @@ public class EventPipelineService {
     // Real-time SSE Emitters for Live UI
     private final List<SseEmitter> sseEmitters = new CopyOnWriteArrayList<>();
 
+    // Lightweight cache for stats to eliminate cross-region DB latency on rapid polling
+    private volatile PipelineStats cachedStats = null;
+    private volatile long lastStatsCacheTime = 0;
+    private static final long STATS_CACHE_TTL_MS = 2000; // 2 seconds TTL
+
     @Autowired
     public EventPipelineService(TokenBucketRateLimiter rateLimiter,
                                 EventDeduplicationService dedupService,
@@ -228,6 +233,24 @@ public class EventPipelineService {
     }
 
     public PipelineStats getStats() {
+        long now = System.currentTimeMillis();
+        if (cachedStats != null && (now - lastStatsCacheTime) < STATS_CACHE_TTL_MS) {
+            // Return cached DB aggregations with real-time dynamic values
+            PipelineStats dynamic = new PipelineStats();
+            dynamic.setTotalIngested(Math.max(cachedStats.getTotalIngested(), totalIngested.get()));
+            dynamic.setTotalProcessed(Math.max(cachedStats.getTotalProcessed(), totalProcessed.get()));
+            dynamic.setTotalRateLimited(Math.max(cachedStats.getTotalRateLimited(), totalRateLimited.get()));
+            dynamic.setTotalDuplicatesBlocked(Math.max(cachedStats.getTotalDuplicatesBlocked(), totalDuplicates.get()));
+            dynamic.setTotalDlq(totalDlq.get());
+            dynamic.setCurrentThroughputEps(currentThroughputEps);
+            dynamic.setAverageLatencyMs(cachedStats.getAverageLatencyMs());
+            dynamic.setTokenBucketCapacity(rateLimiter.getCapacity());
+            dynamic.setTokenBucketAvailable(rateLimiter.getAvailableTokens("default"));
+            dynamic.setActiveKafkaConsumers(3);
+            dynamic.setEventsByType(cachedStats.getEventsByType());
+            return dynamic;
+        }
+
         PipelineStats stats = new PipelineStats();
 
         long dbProcessed = auditRepository.countByStatus(EventStatus.PROCESSED);
@@ -261,6 +284,9 @@ public class EventPipelineService {
         }
         stats.setEventsByType(byType);
 
+        this.cachedStats = stats;
+        this.lastStatsCacheTime = now;
+
         return stats;
     }
 
@@ -281,6 +307,8 @@ public class EventPipelineService {
         totalDlq.set(0);
         windowIngested.set(0);
         currentThroughputEps = 0.0;
+        this.cachedStats = null;
+        this.lastStatsCacheTime = 0;
 
         log.info("Purged {} audit records from Supabase database and reset pipeline metrics.", countBefore);
 
