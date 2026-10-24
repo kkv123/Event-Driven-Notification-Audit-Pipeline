@@ -20,11 +20,15 @@ import org.springframework.util.backoff.FixedBackOff;
 
 import java.util.HashMap;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Configuration
 @EnableKafka
 @ConditionalOnProperty(name = "spring.kafka.enabled", havingValue = "true", matchIfMissing = false)
 public class KafkaConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(KafkaConfig.class);
 
     public static final String TOPIC_TRANSACTIONS = "transaction-events";
     public static final String TOPIC_AUDIT = "audit-events";
@@ -69,8 +73,13 @@ public class KafkaConfig {
             config.put("ssl.truststore.type", "PEM");
             config.put("ssl.truststore.certificates", sslTruststoreCertificates.replace("\\n", "\n").trim());
         } else if (sslTruststoreLocation != null && !sslTruststoreLocation.trim().isEmpty()) {
-            config.put("ssl.truststore.type", "PEM");
-            config.put("ssl.truststore.location", sslTruststoreLocation.trim());
+            java.io.File certFile = new java.io.File(sslTruststoreLocation.trim());
+            if (certFile.exists()) {
+                config.put("ssl.truststore.type", "PEM");
+                config.put("ssl.truststore.location", certFile.getAbsolutePath());
+            } else {
+                log.warn("SSL truststore path [{}] does not exist on this environment; falling back to default system CA bundle.", sslTruststoreLocation);
+            }
         } else if (sslTruststoreType != null && !sslTruststoreType.trim().isEmpty()) {
             config.put("ssl.truststore.type", sslTruststoreType.trim());
         }
