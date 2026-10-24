@@ -46,6 +46,15 @@ public class KafkaConfig {
     @Value("${spring.kafka.properties.sasl.jaas.config:}")
     private String saslJaasConfig;
 
+    @Value("${spring.kafka.properties.ssl.truststore.type:}")
+    private String sslTruststoreType;
+
+    @Value("${spring.kafka.properties.ssl.truststore.location:}")
+    private String sslTruststoreLocation;
+
+    @Value("${spring.kafka.properties.ssl.truststore.certificates:}")
+    private String sslTruststoreCertificates;
+
     private void applySaslConfigs(Map<String, Object> config) {
         if (securityProtocol != null && !securityProtocol.isEmpty()) {
             config.put("security.protocol", securityProtocol);
@@ -56,7 +65,19 @@ public class KafkaConfig {
         if (saslJaasConfig != null && !saslJaasConfig.isEmpty()) {
             config.put("sasl.jaas.config", saslJaasConfig);
         }
+        if (sslTruststoreCertificates != null && !sslTruststoreCertificates.trim().isEmpty()) {
+            config.put("ssl.truststore.type", "PEM");
+            config.put("ssl.truststore.certificates", sslTruststoreCertificates.replace("\\n", "\n").trim());
+        } else if (sslTruststoreLocation != null && !sslTruststoreLocation.trim().isEmpty()) {
+            config.put("ssl.truststore.type", "PEM");
+            config.put("ssl.truststore.location", sslTruststoreLocation.trim());
+        } else if (sslTruststoreType != null && !sslTruststoreType.trim().isEmpty()) {
+            config.put("ssl.truststore.type", sslTruststoreType.trim());
+        }
     }
+
+    @Value("${spring.kafka.topic:pipeline-events}")
+    private String configuredTopic;
 
     @Bean
     public KafkaAdmin kafkaAdmin() {
@@ -70,23 +91,11 @@ public class KafkaConfig {
     }
 
     @Bean
-    public NewTopic transactionEventsTopic() {
-        return TopicBuilder.name(TOPIC_TRANSACTIONS).partitions(3).replicas(1).build();
-    }
-
-    @Bean
-    public NewTopic auditEventsTopic() {
-        return TopicBuilder.name(TOPIC_AUDIT).partitions(3).replicas(1).build();
-    }
-
-    @Bean
-    public NewTopic notificationEventsTopic() {
-        return TopicBuilder.name(TOPIC_NOTIFICATIONS).partitions(3).replicas(1).build();
-    }
-
-    @Bean
-    public NewTopic dlqTopic() {
-        return TopicBuilder.name(TOPIC_DLQ).partitions(1).replicas(1).build();
+    public NewTopic mainEventsTopic() {
+        return TopicBuilder.name(configuredTopic != null ? configuredTopic : "pipeline-events")
+                .partitions(2)
+                .replicas(2)
+                .build();
     }
 
     @Bean

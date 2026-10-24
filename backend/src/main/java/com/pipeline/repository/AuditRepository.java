@@ -19,18 +19,20 @@ public interface AuditRepository extends JpaRepository<AuditEvent, Long> {
 
     List<AuditEvent> findTop50ByOrderByCreatedAtDesc();
 
-    Page<AuditEvent> findByStatus(EventStatus status, Pageable pageable);
+    Page<AuditEvent> findAllByOrderByCreatedAtDesc(Pageable pageable);
+
+    Page<AuditEvent> findByStatusOrderByCreatedAtDesc(EventStatus status, Pageable pageable);
 
     @Query("SELECT a FROM AuditEvent a WHERE " +
-           "(:query IS NULL OR LOWER(a.eventId) LIKE LOWER(CONCAT('%', :query, '%')) " +
+           "(LOWER(a.eventId) LIKE LOWER(CONCAT('%', :query, '%')) " +
            "OR LOWER(a.eventType) LIKE LOWER(CONCAT('%', :query, '%')) " +
            "OR LOWER(a.sourceService) LIKE LOWER(CONCAT('%', :query, '%')) " +
-           "OR LOWER(a.payload) LIKE LOWER(CONCAT('%', :query, '%'))) " +
+           "OR LOWER(CAST(a.payload AS string)) LIKE LOWER(CONCAT('%', :query, '%'))) " +
            "AND (:status IS NULL OR a.status = :status) " +
            "ORDER BY a.createdAt DESC")
     Page<AuditEvent> searchEvents(@Param("query") String query,
-                                 @Param("status") EventStatus status,
-                                 Pageable pageable);
+                                  @Param("status") EventStatus status,
+                                  Pageable pageable);
 
     long countByStatus(EventStatus status);
 

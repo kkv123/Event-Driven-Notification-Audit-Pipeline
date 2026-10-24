@@ -46,7 +46,7 @@ public class EventConsumer {
      * Manually acknowledges after audit persistence and notification dispatch.
      */
     @KafkaListener(
-            topics = {KafkaConfig.TOPIC_TRANSACTIONS, KafkaConfig.TOPIC_AUDIT, KafkaConfig.TOPIC_NOTIFICATIONS},
+            topics = "${spring.kafka.topic:pipeline-events}",
             groupId = "${spring.kafka.consumer.group-id:audit-pipeline-group}",
             containerFactory = "kafkaListenerContainerFactory"
     )

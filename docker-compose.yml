@@ -50,12 +50,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  # 5. Spring Boot Application (Optional Containerized Run)
-  app:
+  # 5. Headless Spring Boot Application (REST + Kafka + Redis + SSE Backend)
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: pipeline-app
+    container_name: pipeline-backend
     depends_on:
       - kafka
       - redis
@@ -68,6 +68,19 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/auditdb
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: password123
+
+  # 6. Standalone React Frontend (Nginx SPA)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8080
+    container_name: pipeline-frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
 
 volumes:
   postgres_data:

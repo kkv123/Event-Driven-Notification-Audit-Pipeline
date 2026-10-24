@@ -37,6 +37,9 @@ public class EventPipelineService {
     @org.springframework.beans.factory.annotation.Value("${spring.kafka.enabled:false}")
     private boolean kafkaEnabled;
 
+    @org.springframework.beans.factory.annotation.Value("${spring.kafka.topic:pipeline-events}")
+    private String configuredTopic;
+
     // Metrics counters
     private final AtomicLong totalIngested = new AtomicLong(0);
     private final AtomicLong totalProcessed = new AtomicLong(0);
@@ -134,10 +137,10 @@ public class EventPipelineService {
         }
 
         // 3. Kafka Routing & Processing
-        String topic = KafkaConfig.TOPIC_TRANSACTIONS;
-        if ("AUDIT".equalsIgnoreCase(request.getEventType())) {
+        String topic = configuredTopic != null && !configuredTopic.isEmpty() ? configuredTopic : KafkaConfig.TOPIC_TRANSACTIONS;
+        if ("AUDIT".equalsIgnoreCase(request.getEventType()) && (configuredTopic == null || configuredTopic.isEmpty())) {
             topic = KafkaConfig.TOPIC_AUDIT;
-        } else if ("NOTIFICATION".equalsIgnoreCase(request.getEventType()) || "ALERT".equalsIgnoreCase(request.getEventType())) {
+        } else if (("NOTIFICATION".equalsIgnoreCase(request.getEventType()) || "ALERT".equalsIgnoreCase(request.getEventType())) && (configuredTopic == null || configuredTopic.isEmpty())) {
             topic = KafkaConfig.TOPIC_NOTIFICATIONS;
         }
 
