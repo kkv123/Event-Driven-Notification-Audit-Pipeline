@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Zap,
   Radio,
@@ -106,20 +106,36 @@ export default function App() {
     [searchQuery, statusFilter]
   );
 
-  // Initial Data and Interval Polling for Stats
+  // Reference for temporary burst polling timer
+  const burstIntervalRef = useRef(null);
+
+  // Clean up any active timer on unmount
+  useEffect(() => {
+    return () => {
+      if (burstIntervalRef.current) {
+        clearInterval(burstIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Initial Data on Page Load (Zero polling when idle)
   useEffect(() => {
     loadStats();
     loadAudit(0);
-    const interval = setInterval(loadStats, 2000);
-    return () => clearInterval(interval);
   }, [loadStats, loadAudit]);
 
   // Subscribe to SSE Feed
   useEffect(() => {
+    let lastSseStatsRefresh = 0;
     const unsubscribe = subscribeToEventStream(
       (newEvent) => {
         setLiveEvents((prev) => [newEvent, ...prev.slice(0, 39)]);
-        loadStats();
+        // Throttle stats fetch on live events so rapid bursts don't spam requests
+        const now = Date.now();
+        if (now - lastSseStatsRefresh > 2000) {
+          lastSseStatsRefresh = now;
+          loadStats();
+        }
       },
       () => {
         setStreamStatus('Reconnecting');
@@ -143,12 +159,29 @@ export default function App() {
   };
 
   // Handle Traffic Burst Simulation
+  // Temporarily polls every 2 seconds for 8 seconds while Token Bucket refills, then STOPS
   const handleBurstSimulation = async () => {
     setIsBursting(true);
+    if (burstIntervalRef.current) {
+      clearInterval(burstIntervalRef.current);
+      burstIntervalRef.current = null;
+    }
+
     try {
       await triggerBurst({ count: 50, includeDuplicates: true });
-      loadStats();
-      loadAudit(0);
+      await loadStats();
+      await loadAudit(0);
+
+      // Trigger temporary 2-second polling for 8 seconds to animate token bucket refill, then stop
+      let pollTicks = 0;
+      burstIntervalRef.current = setInterval(() => {
+        pollTicks++;
+        loadStats();
+        if (pollTicks >= 4) { // 4 ticks * 2s = 8 seconds total
+          clearInterval(burstIntervalRef.current);
+          burstIntervalRef.current = null;
+        }
+      }, 2000);
     } catch (err) {
       console.error('Burst error', err);
       alert('Traffic burst simulation error: ' + (err.message || 'Check backend connection'));
