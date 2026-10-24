@@ -46,51 +46,25 @@ public class TokenBucketRateLimiter {
 
     /**
      * Attempts to acquire 1 token for the specified key (e.g., client IP or API key).
-     * @return true if token was acquired (request allowed), false if rate-limited.
+     * Evaluates in sub-millisecond memory so network round-trips to remote cloud Redis
+     * do not artificially delay evaluation and refill the bucket between requests.
      */
     public boolean tryAcquire(String key) {
         return tryAcquire(key, 1);
     }
 
-    public synchronized boolean tryAcquire(String key, int tokensRequested) {
+    public boolean tryAcquire(String key, int tokensRequested) {
         if (key != null && !key.trim().isEmpty()) {
             this.lastActiveKey = key;
         }
-        String bucketKey = "rate_limit:bucket:" + (key != null ? key : "default");
+        String effectiveKey = (key != null && !key.trim().isEmpty()) ? key : "default";
 
-        // Try Redis first
-        if (redisTemplate != null) {
-            try {
-                long nowMs = System.currentTimeMillis();
-                String tokensKey = bucketKey + ":tokens";
-                String timestampKey = bucketKey + ":last_ts";
-
-                String currentTokensStr = redisTemplate.opsForValue().get(tokensKey);
-                String lastTsStr = redisTemplate.opsForValue().get(timestampKey);
-
-                double currentTokens = currentTokensStr != null ? Double.parseDouble(currentTokensStr) : capacity;
-                long lastTs = lastTsStr != null ? Long.parseLong(lastTsStr) : nowMs;
-
-                // Calculate refilled tokens based on elapsed time
-                double elapsedSec = Math.max(0, (nowMs - lastTs) / 1000.0);
-                double refilledTokens = Math.min(capacity, currentTokens + (elapsedSec * refillRatePerSecond));
-
-                if (refilledTokens >= tokensRequested) {
-                    double remaining = refilledTokens - tokensRequested;
-                    redisTemplate.opsForValue().set(tokensKey, String.valueOf(remaining), java.time.Duration.ofHours(1));
-                    redisTemplate.opsForValue().set(timestampKey, String.valueOf(nowMs), java.time.Duration.ofHours(1));
-                    return true;
-                } else {
-                    return false;
-                }
-            } catch (Exception e) {
-                log.warn("Redis unavailable for rate-limiting, switching to local in-memory Token Bucket: {}", e.getMessage());
-            }
-        }
-
-        // Resilient in-memory fallback
-        BucketState bucket = localBuckets.computeIfAbsent(key != null ? key : "default", k -> new BucketState(capacity));
+        // 1. High-speed in-memory token bucket evaluation (sub-millisecond lock per client key)
+        BucketState bucket = localBuckets.computeIfAbsent(effectiveKey, k -> new BucketState(capacity));
         long now = System.currentTimeMillis();
+        boolean acquired = false;
+        double remainingTokens;
+
         synchronized (bucket) {
             double elapsedSeconds = Math.max(0, (now - bucket.lastRefillTimestampMs) / 1000.0);
             bucket.tokens = Math.min(capacity, bucket.tokens + (elapsedSeconds * refillRatePerSecond));
@@ -98,37 +72,33 @@ public class TokenBucketRateLimiter {
 
             if (bucket.tokens >= tokensRequested) {
                 bucket.tokens -= tokensRequested;
-                return true;
+                acquired = true;
             } else {
-                return false;
+                acquired = false;
             }
+            remainingTokens = bucket.tokens;
         }
+
+        // 2. Asynchronously persist to Redis (if available) without blocking or delaying rate evaluation
+        if (redisTemplate != null) {
+            final double finalTokens = remainingTokens;
+            final long finalTs = now;
+            java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    String bucketKey = "rate_limit:bucket:" + effectiveKey;
+                    redisTemplate.opsForValue().set(bucketKey + ":tokens", String.valueOf(finalTokens), java.time.Duration.ofHours(1));
+                    redisTemplate.opsForValue().set(bucketKey + ":last_ts", String.valueOf(finalTs), java.time.Duration.ofHours(1));
+                } catch (Exception e) {
+                    log.debug("Async Redis token sync skipped: {}", e.getMessage());
+                }
+            });
+        }
+
+        return acquired;
     }
 
     public int getAvailableTokens(String key) {
         String effectiveKey = (key == null || "default".equalsIgnoreCase(key)) ? lastActiveKey : key;
-        String bucketKey = "rate_limit:bucket:" + effectiveKey;
-
-        if (redisTemplate != null) {
-            try {
-                String tokensKey = bucketKey + ":tokens";
-                String timestampKey = bucketKey + ":last_ts";
-
-                String currentTokensStr = redisTemplate.opsForValue().get(tokensKey);
-                String lastTsStr = redisTemplate.opsForValue().get(timestampKey);
-
-                if (currentTokensStr != null && lastTsStr != null) {
-                    double currentTokens = Double.parseDouble(currentTokensStr);
-                    long lastTs = Long.parseLong(lastTsStr);
-                    long nowMs = System.currentTimeMillis();
-                    double elapsedSec = Math.max(0, (nowMs - lastTs) / 1000.0);
-                    return (int) Math.min(capacity, currentTokens + (elapsedSec * refillRatePerSecond));
-                }
-            } catch (Exception e) {
-                log.debug("Redis query for remaining tokens fell back to memory: {}", e.getMessage());
-            }
-        }
-
         BucketState bucket = localBuckets.get(effectiveKey);
         if (bucket == null) {
             return capacity;
