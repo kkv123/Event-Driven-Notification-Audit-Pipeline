@@ -1,0 +1,25 @@
+name: Render Working Hours Keep-Alive
+
+on:
+  schedule:
+    # Runs every 14 minutes between 02:00 UTC and 14:30 UTC
+    # (07:30 AM to 08:00 PM India Standard Time, IST = UTC + 5:30)
+    - cron: '*/14 2-14 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping-render:
+    name: Ping Render Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Health Endpoint
+        run: |
+          echo "Sending keep-alive ping to Render backend..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://event-driven-notification-audit-pipeline.onrender.com/api/events/health)
+          echo "Render HTTP Status: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "Render backend is alive and healthy!"
+          else
+            echo "Warning: Received HTTP $STATUS"
+          fi
