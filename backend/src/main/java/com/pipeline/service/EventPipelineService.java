@@ -69,6 +69,25 @@ public class EventPipelineService {
         this.objectMapper = objectMapper;
     }
 
+    @jakarta.annotation.PostConstruct
+    public void initCountersFromDatabase() {
+        try {
+            long processed = auditRepository.countByStatus(EventStatus.PROCESSED);
+            long rateLimited = auditRepository.countByStatus(EventStatus.RATE_LIMITED);
+            long duplicates = auditRepository.countByStatus(EventStatus.DUPLICATE_IGNORED);
+            long total = auditRepository.count();
+
+            totalProcessed.set(processed);
+            totalRateLimited.set(rateLimited);
+            totalDuplicates.set(duplicates);
+            totalIngested.set(total);
+            log.info("Initialized pipeline counters from Supabase DB: total={}, processed={}, rateLimited={}, duplicates={}",
+                    total, processed, rateLimited, duplicates);
+        } catch (Exception e) {
+            log.warn("Could not load initial counters from DB, starting from 0: {}", e.getMessage());
+        }
+    }
+
     /**
      * Core Ingestion Pipeline: Rate Limit -> Deduplicate -> Publish to Kafka / Process
      */
@@ -210,10 +229,21 @@ public class EventPipelineService {
 
     public PipelineStats getStats() {
         PipelineStats stats = new PipelineStats();
-        stats.setTotalIngested(totalIngested.get());
-        stats.setTotalProcessed(totalProcessed.get());
-        stats.setTotalRateLimited(totalRateLimited.get());
-        stats.setTotalDuplicatesBlocked(totalDuplicates.get());
+
+        long dbProcessed = auditRepository.countByStatus(EventStatus.PROCESSED);
+        long dbRateLimited = auditRepository.countByStatus(EventStatus.RATE_LIMITED);
+        long dbDuplicates = auditRepository.countByStatus(EventStatus.DUPLICATE_IGNORED);
+        long dbTotal = auditRepository.count();
+
+        long processed = Math.max(dbProcessed, totalProcessed.get());
+        long rateLimited = Math.max(dbRateLimited, totalRateLimited.get());
+        long duplicates = Math.max(dbDuplicates, totalDuplicates.get());
+        long ingested = Math.max(dbTotal, totalIngested.get());
+
+        stats.setTotalIngested(ingested);
+        stats.setTotalProcessed(processed);
+        stats.setTotalRateLimited(rateLimited);
+        stats.setTotalDuplicatesBlocked(duplicates);
         stats.setTotalDlq(totalDlq.get());
         stats.setCurrentThroughputEps(currentThroughputEps);
 
