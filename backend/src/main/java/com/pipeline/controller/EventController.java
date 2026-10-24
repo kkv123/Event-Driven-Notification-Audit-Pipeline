@@ -70,35 +70,41 @@ public class EventController {
         String[] types = {"TRANSACTION_SETTLED", "SECURITY_ALERT", "POLICY_RENEWAL", "KYC_VERIFICATION"};
         String fixedDuplicateKey = "shared-idempotency-token-" + (System.currentTimeMillis() / 10000);
 
-        List<CompletableFuture<Void>> futures = new ArrayList<>();
-        for (int i = 0; i < count; i++) {
-            final int index = i;
-            EventRequest req = new EventRequest();
-            req.setEventId("burst-" + UUID.randomUUID().toString().substring(0, 8));
-            req.setEventType(types[index % types.length]);
-            req.setSourceService("payment-gateway-v2");
+        // Explicit multi-threaded executor to guarantee true concurrency even on 1-vCPU cloud instances (like Render Free Tier)
+        java.util.concurrent.ExecutorService burstExecutor = java.util.concurrent.Executors.newFixedThreadPool(Math.min(count, 30));
+        try {
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            for (int i = 0; i < count; i++) {
+                final int index = i;
+                EventRequest req = new EventRequest();
+                req.setEventId("burst-" + UUID.randomUUID().toString().substring(0, 8));
+                req.setEventType(types[index % types.length]);
+                req.setSourceService("payment-gateway-v2");
 
-            // Deliberately introduce duplicate keys every 4th event if enabled
-            if (includeDuplicates && (index % 4 == 0)) {
-                req.setIdempotencyKey(fixedDuplicateKey);
-            } else {
-                req.setIdempotencyKey("unique-key-" + UUID.randomUUID().toString().substring(0, 8));
+                // Deliberately introduce duplicate keys every 4th event if enabled
+                if (includeDuplicates && (index % 4 == 0)) {
+                    req.setIdempotencyKey(fixedDuplicateKey);
+                } else {
+                    req.setIdempotencyKey("unique-key-" + UUID.randomUUID().toString().substring(0, 8));
+                }
+
+                req.setData(Map.of(
+                        "transactionId", "TXN-" + (100000 + index),
+                        "amount", 150.0 + (index * 25.5),
+                        "currency", "INR",
+                        "timestamp", System.currentTimeMillis()
+                ));
+
+                futures.add(CompletableFuture.runAsync(() -> {
+                    EventResponse res = pipelineService.processEvent(req, clientIp);
+                    responses.add(res);
+                }, burstExecutor));
             }
 
-            req.setData(Map.of(
-                    "transactionId", "TXN-" + (100000 + index),
-                    "amount", 150.0 + (index * 25.5),
-                    "currency", "INR",
-                    "timestamp", System.currentTimeMillis()
-            ));
-
-            futures.add(CompletableFuture.runAsync(() -> {
-                EventResponse res = pipelineService.processEvent(req, clientIp);
-                responses.add(res);
-            }));
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } finally {
+            burstExecutor.shutdown();
         }
-
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
 
         long processed = responses.stream().filter(r -> r.getStatus() == EventStatus.PROCESSED).count();
         long rateLimited = responses.stream().filter(r -> r.getStatus() == EventStatus.RATE_LIMITED).count();
