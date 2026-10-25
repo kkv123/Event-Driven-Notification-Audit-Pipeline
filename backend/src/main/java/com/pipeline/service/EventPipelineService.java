@@ -287,7 +287,8 @@ public class EventPipelineService {
     public PipelineStats getStats() {
         PipelineStats stats = new PipelineStats();
 
-        stats.setTotalIngested(totalIngested.get());
+        long totalOutcomes = totalProcessed.get() + totalRateLimited.get() + totalDuplicates.get();
+        stats.setTotalIngested(Math.max(totalIngested.get(), totalOutcomes));
         stats.setTotalProcessed(totalProcessed.get());
         stats.setTotalRateLimited(totalRateLimited.get());
         stats.setTotalDuplicatesBlocked(totalDuplicates.get());

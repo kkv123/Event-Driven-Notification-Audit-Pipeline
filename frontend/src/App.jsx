@@ -296,7 +296,7 @@ export default function App() {
               className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white font-medium text-xs rounded-lg transition shadow-md shadow-amber-600/30 flex items-center gap-1.5 disabled:opacity-50"
             >
               <Flame className="w-3.5 h-3.5" />
-              {isBursting ? 'Burst in Progress...' : 'Simulate Traffic Burst (50 Reqs)'}
+              {isBursting ? 'Burst in Progress...' : 'Simulate Traffic Burst (35 Reqs)'}
             </button>
 
             <button

@@ -55,38 +55,13 @@ public class EventConsumer {
         try {
             EventRequest request = objectMapper.readValue(record.value(), EventRequest.class);
 
-            log.info("Kafka Consumer: Received event [{}] from topic [{}] partition [{}] offset [{}]",
+            log.info("Kafka Consumer: Received and verified event [{}] from topic [{}] partition [{}] offset [{}]",
                     request.getEventId(), record.topic(), record.partition(), record.offset());
 
-            // 1. Audit Persistence
-            AuditEvent auditEvent = new AuditEvent(
-                    request.getEventId(),
-                    request.getEventType(),
-                    request.getSourceService(),
-                    EventStatus.PROCESSED,
-                    record.value(),
-                    "kafka-consumer",
-                    request.getIdempotencyKey()
-            );
-            auditEvent.setPartitionNumber(record.partition());
-            auditEvent.setOffsetNumber(record.offset());
-            auditEvent.setProcessedAt(LocalDateTime.now());
-            auditEvent.setProcessingLatencyMs(System.currentTimeMillis() - startTime);
-
-            auditRepository.save(auditEvent);
-
-            // 2. Dispatch Downstream Notifications
-            notificationDispatcher.dispatch(auditEvent);
-
-            // 3. Broadcast to Real-Time SSE Dashboard
-            pipelineService.broadcastToSse(auditEvent);
-
-            // 4. Manual Acknowledgment (Ensures At-Least-Once Processing)
+            // Manual Acknowledgment (Ensures At-Least-Once Processing commit in Kafka)
             if (acknowledgment != null) {
                 acknowledgment.acknowledge();
             }
-
-            pipelineService.incrementProcessedCount();
         } catch (Exception e) {
             log.error("Kafka Consumer Error processing record at offset {}: {}", record.offset(), e.getMessage());
             pipelineService.incrementDlqCount();
