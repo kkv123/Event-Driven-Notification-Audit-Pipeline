@@ -160,9 +160,13 @@ public class EventController {
 
     /**
      * Returns pipeline statistics: Ingestion rate, Token Bucket status, Deduplication stats.
+     * When sync=true (e.g. on page load/refresh), re-syncs in-memory RAM counters from Supabase DB.
      */
     @GetMapping("/stats")
-    public ResponseEntity<PipelineStats> getPipelineStats() {
+    public ResponseEntity<PipelineStats> getPipelineStats(@RequestParam(defaultValue = "false") boolean sync) {
+        if (sync) {
+            pipelineService.syncCountersFromDatabase();
+        }
         return ResponseEntity.ok(pipelineService.getStats());
     }
 

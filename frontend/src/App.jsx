@@ -75,9 +75,9 @@ export default function App() {
   const [streamFilter, setStreamFilter] = useState('ALL');
 
   // Load Stats
-  const loadStats = useCallback(async () => {
+  const loadStats = useCallback(async (sync = false) => {
     try {
-      const data = await fetchStats();
+      const data = await fetchStats(sync);
       if (data) setStats(data);
     } catch (e) {
       // Backend may be starting up
@@ -118,9 +118,9 @@ export default function App() {
     };
   }, []);
 
-  // Initial Data on Page Load (Zero polling when idle)
+  // Initial Data on Page Load / Refresh (Syncs RAM with Supabase DB)
   useEffect(() => {
-    loadStats();
+    loadStats(true);
     loadAudit(0);
   }, [loadStats, loadAudit]);
 
@@ -180,6 +180,7 @@ export default function App() {
           clearInterval(burstIntervalRef.current);
           burstIntervalRef.current = null;
           setIsBursting(false);
+          loadStats(true);
           loadAudit(0);
         }
       }, 1000);
@@ -210,7 +211,7 @@ export default function App() {
     try {
       const res = await purgeAuditLogs();
       setLiveEvents([]);
-      await loadStats();
+      await loadStats(true);
       await loadAudit(0);
       alert(`Cleanup Complete: ${res.recordsPurged ?? 0} historical records purged from Supabase.`);
     } catch (err) {

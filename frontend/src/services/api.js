@@ -32,8 +32,9 @@ function resolveUrl(path) {
   return base ? `${base}${path}` : path;
 }
 
-export async function fetchStats() {
-  const res = await fetch(resolveUrl('/api/events/stats'));
+export async function fetchStats(sync = false) {
+  const path = sync ? '/api/events/stats?sync=true' : '/api/events/stats';
+  const res = await fetch(resolveUrl(path));
   if (!res.ok) {
     throw new Error(`Failed to fetch stats: ${res.statusText}`);
   }

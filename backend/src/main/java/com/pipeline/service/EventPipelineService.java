@@ -76,7 +76,7 @@ public class EventPipelineService {
     }
 
     @jakarta.annotation.PostConstruct
-    public void initCountersFromDatabase() {
+    public void syncCountersFromDatabase() {
         try {
             long processed = auditRepository.countByStatus(EventStatus.PROCESSED);
             long rateLimited = auditRepository.countByStatus(EventStatus.RATE_LIMITED);
@@ -87,11 +87,11 @@ public class EventPipelineService {
             totalRateLimited.set(rateLimited);
             totalDuplicates.set(duplicates);
             totalIngested.set(total);
-            log.info("Initialized pipeline counters from Supabase DB: total={}, processed={}, rateLimited={}, duplicates={}",
+            log.info("Synced pipeline counters from Supabase DB: total={}, processed={}, rateLimited={}, duplicates={}",
                     total, processed, rateLimited, duplicates);
             refreshDbAggregates();
         } catch (Exception e) {
-            log.warn("Could not load initial counters from DB, starting from 0: {}", e.getMessage());
+            log.warn("Could not sync counters from DB, starting from 0: {}", e.getMessage());
         }
     }
 
