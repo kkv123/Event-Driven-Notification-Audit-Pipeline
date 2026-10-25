@@ -18,6 +18,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -88,6 +89,7 @@ public class EventPipelineService {
             totalIngested.set(total);
             log.info("Initialized pipeline counters from Supabase DB: total={}, processed={}, rateLimited={}, duplicates={}",
                     total, processed, rateLimited, duplicates);
+            refreshDbAggregates();
         } catch (Exception e) {
             log.warn("Could not load initial counters from DB, starting from 0: {}", e.getMessage());
         }
@@ -124,8 +126,14 @@ public class EventPipelineService {
                     request.getIdempotencyKey()
             );
             limitedEvent.setProcessingLatencyMs(latency);
-            auditRepository.save(limitedEvent);
             broadcastToSse(limitedEvent);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    auditRepository.save(limitedEvent);
+                } catch (Exception e) {
+                    log.error("Async DB save failed for rate-limited event [{}]: {}", limitedEvent.getEventId(), e.getMessage());
+                }
+            });
 
             EventResponse resp = new EventResponse(request.getEventId(), EventStatus.RATE_LIMITED,
                     "Too Many Requests: Token Bucket exhausted. Rate limit applied.", request.getEventType(), latency);
@@ -151,8 +159,14 @@ public class EventPipelineService {
                     request.getIdempotencyKey()
             );
             dupEvent.setProcessingLatencyMs(latency);
-            auditRepository.save(dupEvent);
             broadcastToSse(dupEvent);
+            CompletableFuture.runAsync(() -> {
+                try {
+                    auditRepository.save(dupEvent);
+                } catch (Exception e) {
+                    log.error("Async DB save failed for duplicate event [{}]: {}", dupEvent.getEventId(), e.getMessage());
+                }
+            });
 
             EventResponse resp = new EventResponse(request.getEventId(), EventStatus.DUPLICATE_IGNORED,
                     "Duplicate event detected and suppressed by Redis deduplication filter.", request.getEventType(), latency);
@@ -188,10 +202,19 @@ public class EventPipelineService {
         successEvent.setProcessedAt(LocalDateTime.now());
         successEvent.setPartitionNumber(Math.abs(request.getEventId().hashCode() % 3));
         successEvent.setOffsetNumber(totalProcessed.incrementAndGet());
-        auditRepository.save(successEvent);
 
+        // Broadcast to UI immediately for zero lag
         notificationDispatcher.dispatch(successEvent);
         broadcastToSse(successEvent);
+
+        // Persist to DB asynchronously in background
+        CompletableFuture.runAsync(() -> {
+            try {
+                auditRepository.save(successEvent);
+            } catch (Exception e) {
+                log.error("Async DB save failed for processed event [{}]: {}", successEvent.getEventId(), e.getMessage());
+            }
+        });
 
         EventResponse resp = new EventResponse(request.getEventId(), EventStatus.PROCESSED,
                 "Event ingested into Kafka topic [" + topic + "] with at-least-once delivery guarantee.",
@@ -207,9 +230,11 @@ public class EventPipelineService {
         List<SseEmitter> deadEmitters = new ArrayList<>();
         for (SseEmitter emitter : sseEmitters) {
             try {
-                emitter.send(SseEmitter.event()
-                        .name("event")
-                        .data(event));
+                synchronized (emitter) {
+                    emitter.send(SseEmitter.event()
+                            .name("event")
+                            .data(event));
+                }
             } catch (Exception e) {
                 deadEmitters.add(emitter);
             }
@@ -232,60 +257,55 @@ public class EventPipelineService {
         this.currentThroughputEps = count;
     }
 
-    public PipelineStats getStats() {
-        long now = System.currentTimeMillis();
-        if (cachedStats != null && (now - lastStatsCacheTime) < STATS_CACHE_TTL_MS) {
-            // Return cached DB aggregations with real-time dynamic values
-            PipelineStats dynamic = new PipelineStats();
-            dynamic.setTotalIngested(Math.max(cachedStats.getTotalIngested(), totalIngested.get()));
-            dynamic.setTotalProcessed(Math.max(cachedStats.getTotalProcessed(), totalProcessed.get()));
-            dynamic.setTotalRateLimited(Math.max(cachedStats.getTotalRateLimited(), totalRateLimited.get()));
-            dynamic.setTotalDuplicatesBlocked(Math.max(cachedStats.getTotalDuplicatesBlocked(), totalDuplicates.get()));
-            dynamic.setTotalDlq(totalDlq.get());
-            dynamic.setCurrentThroughputEps(currentThroughputEps);
-            dynamic.setAverageLatencyMs(cachedStats.getAverageLatencyMs());
-            dynamic.setTokenBucketCapacity(rateLimiter.getCapacity());
-            dynamic.setTokenBucketAvailable(rateLimiter.getAvailableTokens("default"));
-            dynamic.setActiveKafkaConsumers(3);
-            dynamic.setEventsByType(cachedStats.getEventsByType());
-            return dynamic;
-        }
+    /**
+     * Background refresh of heavier DB calculations (average latency & event distribution)
+     * every 15 seconds so getStats() NEVER runs blocking SQL queries during user bursts.
+     */
+    @Scheduled(fixedRate = 15000)
+    public void refreshDbAggregates() {
+        try {
+            PipelineStats stats = new PipelineStats();
+            Double avgLat = auditRepository.getAverageProcessingLatency();
+            stats.setAverageLatencyMs(avgLat != null ? Math.round(avgLat * 10.0) / 10.0 : 1.2);
 
+            Map<String, Long> byType = new HashMap<>();
+            List<Object[]> rows = auditRepository.countByEventType();
+            for (Object[] row : rows) {
+                byType.put(String.valueOf(row[0]), (Long) row[1]);
+            }
+            stats.setEventsByType(byType);
+            this.cachedStats = stats;
+        } catch (Exception e) {
+            log.warn("Background refresh of DB aggregates skipped: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Blazing fast in-memory stats return (< 1ms).
+     * Returns Atomic counters directly without locking or waiting for cloud PostgreSQL.
+     */
+    public PipelineStats getStats() {
         PipelineStats stats = new PipelineStats();
 
-        long dbProcessed = auditRepository.countByStatus(EventStatus.PROCESSED);
-        long dbRateLimited = auditRepository.countByStatus(EventStatus.RATE_LIMITED);
-        long dbDuplicates = auditRepository.countByStatus(EventStatus.DUPLICATE_IGNORED);
-        long dbTotal = auditRepository.count();
-
-        long processed = Math.max(dbProcessed, totalProcessed.get());
-        long rateLimited = Math.max(dbRateLimited, totalRateLimited.get());
-        long duplicates = Math.max(dbDuplicates, totalDuplicates.get());
-        long ingested = Math.max(dbTotal, totalIngested.get());
-
-        stats.setTotalIngested(ingested);
-        stats.setTotalProcessed(processed);
-        stats.setTotalRateLimited(rateLimited);
-        stats.setTotalDuplicatesBlocked(duplicates);
+        stats.setTotalIngested(totalIngested.get());
+        stats.setTotalProcessed(totalProcessed.get());
+        stats.setTotalRateLimited(totalRateLimited.get());
+        stats.setTotalDuplicatesBlocked(totalDuplicates.get());
         stats.setTotalDlq(totalDlq.get());
         stats.setCurrentThroughputEps(currentThroughputEps);
-
-        Double avgLat = auditRepository.getAverageProcessingLatency();
-        stats.setAverageLatencyMs(avgLat != null ? Math.round(avgLat * 10.0) / 10.0 : 1.2);
 
         stats.setTokenBucketCapacity(rateLimiter.getCapacity());
         stats.setTokenBucketAvailable(rateLimiter.getAvailableTokens("default"));
         stats.setActiveKafkaConsumers(3);
 
-        Map<String, Long> byType = new HashMap<>();
-        List<Object[]> rows = auditRepository.countByEventType();
-        for (Object[] row : rows) {
-            byType.put(String.valueOf(row[0]), (Long) row[1]);
+        PipelineStats cached = this.cachedStats;
+        if (cached != null) {
+            stats.setAverageLatencyMs(cached.getAverageLatencyMs());
+            stats.setEventsByType(cached.getEventsByType());
+        } else {
+            stats.setAverageLatencyMs(1.2);
+            stats.setEventsByType(Collections.emptyMap());
         }
-        stats.setEventsByType(byType);
-
-        this.cachedStats = stats;
-        this.lastStatsCacheTime = now;
 
         return stats;
     }

@@ -159,7 +159,7 @@ export default function App() {
   };
 
   // Handle Traffic Burst Simulation
-  // Temporarily polls every 2 seconds for 8 seconds while Token Bucket refills, then STOPS
+  // Non-blocking trigger with immediate 1s interval polling to animate metrics and Token Bucket live
   const handleBurstSimulation = async () => {
     setIsBursting(true);
     if (burstIntervalRef.current) {
@@ -168,24 +168,33 @@ export default function App() {
     }
 
     try {
-      await triggerBurst({ count: 50, includeDuplicates: true });
-      await loadStats();
-      await loadAudit(0);
+      // Immediate load
+      loadStats();
 
-      // Trigger temporary 2-second polling for 8 seconds to animate token bucket refill, then stop
+      // Poll stats every 1 second for 6 seconds to animate the Token Bucket emptying & refilling live
       let pollTicks = 0;
       burstIntervalRef.current = setInterval(() => {
         pollTicks++;
         loadStats();
-        if (pollTicks >= 4) { // 4 ticks * 2s = 8 seconds total
+        if (pollTicks >= 6) {
           clearInterval(burstIntervalRef.current);
           burstIntervalRef.current = null;
+          setIsBursting(false);
+          loadAudit(0);
         }
-      }, 2000);
+      }, 1000);
+
+      // Trigger burst asynchronously without awaiting or blocking the UI thread
+      triggerBurst({ count: 35, includeDuplicates: true })
+        .then(() => {
+          loadStats();
+        })
+        .catch((err) => {
+          console.error('Burst error', err);
+          setIsBursting(false);
+        });
     } catch (err) {
       console.error('Burst error', err);
-      alert('Traffic burst simulation error: ' + (err.message || 'Check backend connection'));
-    } finally {
       setIsBursting(false);
     }
   };
