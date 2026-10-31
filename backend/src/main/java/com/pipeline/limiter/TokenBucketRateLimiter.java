@@ -29,7 +29,7 @@ public class TokenBucketRateLimiter {
     private final RedissonClient redissonClient;
 
     // Configurable defaults for rate-limiting
-    private final int capacity = 25; // Max burst capacity
+    private final int capacity = 15; // Max burst capacity (reduced from 25 to 15 for cloud free-tier execution)
     private final double refillRatePerSecond = 5.0; // 5 tokens added per second
 
     // Resilient In-Memory Fallback State (when Redis is unavailable)
@@ -123,8 +123,10 @@ public class TokenBucketRateLimiter {
                 String limiterKey = "redisson:rate_limit:" + effectiveKey;
                 RRateLimiter rateLimiter = redissonClient.getRateLimiter(limiterKey);
 
-                // Initialize rate limiter once: 25 tokens capacity, refills at 5 tokens every 1 second
-                rateLimiter.trySetRate(RateType.OVERALL, capacity, 1, RateIntervalUnit.SECONDS);
+                // Initialize or update rate limiter: 15 tokens capacity, refills at 5 tokens every 1 second
+                if (!rateLimiter.trySetRate(RateType.OVERALL, capacity, 1, RateIntervalUnit.SECONDS)) {
+                    rateLimiter.setRate(RateType.OVERALL, capacity, 1, RateIntervalUnit.SECONDS);
+                }
 
                 // Atomically try to acquire tokens from Redis (single 1ms network trip, 0 Java locks)
                 return rateLimiter.tryAcquire(tokensRequested);

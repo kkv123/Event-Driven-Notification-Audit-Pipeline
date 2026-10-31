@@ -33,7 +33,7 @@ flowchart TD
     Client(["Client / Microservice Producers"]) -->|POST /api/events/publish| Gateway["Ingestion Gateway (Spring Boot)"]
     
     subgraph DefenseTier ["Defensive Gateway Tier"]
-        Gateway -->|1. Check Quota| RateLimiter["Token Bucket Rate Limiter\n(Redis / 25 Burst, +5/s Refill)"]
+        Gateway -->|1. Check Quota| RateLimiter["Token Bucket Rate Limiter\n(Redis / 15 Burst, +5/s Refill)"]
         RateLimiter -->|Quota Exceeded| Drop429["429 Too Many Requests\n(Audit Rate-Limited)"]
         RateLimiter -->|Allowed| DedupFilter["Deduplication Filter\n(Redis SHA-256 SETNX / TTL: 10m)"]
         DedupFilter -->|Duplicate Seen| Suppress["200 Duplicate Suppressed\n(Audit Deduplicated)"]
@@ -65,7 +65,7 @@ flowchart TD
 
 ### A. Token Bucket Algorithm (Distributed Rate Limiting)
 Located in [`TokenBucketRateLimiter.java`](file:///C:/Users/91986/.gemini/antigravity/scratch/event-pipeline/backend/src/main/java/com/pipeline/limiter/TokenBucketRateLimiter.java):
-* **Burst Capacity ($C$):** 25 tokens.
+* **Burst Capacity ($C$):** 15 tokens.
 * **Refill Rate ($r$):** 5 tokens per second.
 * **Mechanism:**
   $$\text{Tokens}_{\text{new}} = \min(C, \text{Tokens}_{\text{prev}} + (t_{\text{now}} - t_{\text{prev}}) \times r)$$
@@ -157,7 +157,7 @@ curl -X POST "http://localhost:8080/api/events/burst?count=35&includeDuplicates=
 ```json
 {
   "burstSize": 35,
-  "processed": 25,
+  "processed": 15,
   "rateLimitedByTokenBucket": 7,
   "duplicatesBlockedByRedis": 3,
   "sampleResponses": [...]
@@ -182,7 +182,7 @@ When interviewers ask about this project, you can confidently explain:
 1. **Why Kafka over RabbitMQ or simple queues?**
    * *Answer:* Kafka's partitioned log architecture allows horizontal scale and ordered partition streams. We can have 3 concurrent consumer threads matching 3 partitions while preserving per-entity order using correlation IDs as partition keys.
 2. **How does the Token Bucket rate limiter protect the pipeline?**
-   * *Answer:* Unlike fixed-window counters that suffer from boundary burst spikes, the Token Bucket algorithm smoothly refills tokens at a steady rate (+5/sec) while allowing controlled bursts up to the 25-token ceiling.
+   * *Answer:* Unlike fixed-window counters that suffer from boundary burst spikes, the Token Bucket algorithm smoothly refills tokens at a steady rate (+5/sec) while allowing controlled bursts up to the 15-token ceiling.
 3. **How is deduplication handled without overloading the database?**
    * *Answer:* Checking database tables on every transaction causes disk I/O bottlenecks. We use Redis atomic `SETNX` with a 10-minute TTL. Uniqueness is evaluated in sub-milliseconds in RAM; duplicates are dropped before touching the database.
 4. **How did you achieve guaranteed at-least-once delivery?**

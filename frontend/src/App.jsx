@@ -43,8 +43,8 @@ export default function App() {
     totalDuplicatesBlocked: 0,
     currentThroughputEps: 0.0,
     averageLatencyMs: 0.0,
-    tokenBucketCapacity: 25,
-    tokenBucketAvailable: 25,
+    tokenBucketCapacity: 15,
+    tokenBucketAvailable: 15,
     eventsByType: {}
   });
 

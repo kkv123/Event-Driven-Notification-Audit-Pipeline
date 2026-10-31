@@ -1,8 +1,8 @@
 import React from 'react';
 import { Coins, ShieldCheck, Zap } from 'lucide-react';
 
-export default function TokenBucketGauge({ available = 25, capacity = 25 }) {
-  const safeCapacity = capacity > 0 ? capacity : 25;
+export default function TokenBucketGauge({ available = 15, capacity = 15 }) {
+  const safeCapacity = capacity > 0 ? capacity : 15;
   const safeAvailable = Math.min(safeCapacity, Math.max(0, available ?? safeCapacity));
   const pct = Math.round((safeAvailable / safeCapacity) * 100);
 

@@ -12,7 +12,7 @@ const NODES = [
   },
   {
     step: '2. Rate Limiter',
-    desc: 'Token Bucket (Cap: 25, Refill: 5/s)',
+    desc: 'Token Bucket (Cap: 15, Refill: 5/s)',
     icon: Filter,
     color: 'amber',
     borderHover: 'hover:border-amber-500',

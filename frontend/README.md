@@ -9,7 +9,7 @@ Designed to interface with the Spring Boot + Apache Kafka + Redis + PostgreSQL b
 ## 🚀 Key Features
 
 - **Live Pipeline Stream (SSE)**: Subscribes to real-time Server-Sent Events (`/api/events/stream`) with status badges (`PROCESSED`, `RATE_LIMITED`, `DUPLICATE_IGNORED`, `DLQ`), event IDs, partition numbers, and latencies.
-- **Token Bucket Gauge**: Visualizes token bucket rate limiting (Capacity: 25, Refill: +5/sec) with animated fill gradients and alerts.
+- **Token Bucket Gauge**: Visualizes token bucket rate limiting (Capacity: 15, Refill: +5/sec) with animated fill gradients and alerts.
 - **Event Distribution Chart**: Interactive SVG donut chart with event-type breakdown and hover tooltips.
 - **Audit Trail & Filtering**: Full PostgreSQL audit log search by Event ID, type, payload, status dropdown filter, and server-side pagination.
 - **Interactive Ingestion Modal**: Submit test events with pre-built JSON templates (Payment, Policy, KYC, Security Alert) and idempotency keys.
